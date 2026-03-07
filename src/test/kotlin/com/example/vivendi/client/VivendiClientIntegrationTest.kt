@@ -26,5 +26,7 @@ class VivendiFlowIntegrationTest {
         val residents = residentService.getResidents(session)
 
         assertTrue(residents.isNotEmpty())
+
+        httpClient.close()
     }
 }

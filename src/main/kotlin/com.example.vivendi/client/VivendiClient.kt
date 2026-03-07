@@ -7,7 +7,9 @@ import com.example.vivendi.client.dto.LoadFilter
 import com.example.vivendi.client.dto.ResidentsGraphQlRequest
 import com.example.vivendi.client.dto.ResidentsGraphQlResponse
 import com.example.vivendi.client.dto.ResidentsVariables
+import com.example.vivendi.client.exception.AuthenticationException
 import com.example.vivendi.residents.dto.*
+import com.typesafe.config.Config
 import io.ktor.client.HttpClient
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -23,13 +25,14 @@ import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import com.typesafe.config.ConfigFactory
 
 class VivendiClient(
-    private val httpClient: HttpClient
+    private val httpClient: HttpClient,
 ) {
 
-    private val baseUrl = "https://vivapp.vivendi.de:4482/api/vivendi/v1"
-
+    private val config: Config = ConfigFactory.load()
+    private val baseUrl: String = config.getString("vivendi.baseUrl")
     suspend fun authenticate(username: String, password: String): LoginResponse {
         val rsaKey = fetchRsaPublicKey()
         val encryptedPassword = encryptVivendiV1Password(password, rsaKey)
@@ -52,10 +55,11 @@ class VivendiClient(
             .map { parseServerSetCookieHeader(it) }
 
         val authToken = cookies.firstOrNull { it.name == "Auth-Token" }?.value
-            ?: error("Auth-Token cookie missing from login response")
+            ?:  throw AuthenticationException("Auth-Token cookie missing")
 
         val xsrfToken = cookies.firstOrNull { it.name == "Xsrf-Token" }?.value
-            ?: error("Xsrf-Token cookie missing from login response")
+            ?:  throw AuthenticationException("Xsrf-Token cookie missing")
+
 
         return LoginResponse(
             authToken = authToken,

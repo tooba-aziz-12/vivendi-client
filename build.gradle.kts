@@ -26,4 +26,5 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.coroutines.test)
+    implementation(libs.typesafe.config)
 }
