@@ -69,14 +69,7 @@ class VivendiClient(
         sectionId: Int = 195
     ): List<ResidentResponse> {
 
-        val query = """
-            query klientenListe(${'$'}bereichId: Int) {
-              klienten(bereichId: ${'$'}bereichId) {
-                ${fields.joinToString("\n")}
-              }
-            }
-        """.trimIndent()
-
+        val query = GraphQLQueryBuilder.residents(fields)
         val response: ResidentsGraphQlResponse = httpClient.post("$baseUrl/graphql") {
 
             contentType(ContentType.Application.Json)
@@ -127,45 +120,6 @@ class VivendiClient(
 
 
         return response.publicKey
-    }
-
-    companion object {
-        private const val RESIDENTS_QUERY = """
-            query klientenListe(
-              ${'$'}klientId: [Int],
-              ${'$'}auchAbwesende: Boolean,
-              ${'$'}nurPdBereiche: Boolean,
-              ${'$'}bereichId: Int,
-              ${'$'}datum: DateTime,
-              ${'$'}mitVerlauf: Boolean = false,
-              ${'$'}alleVerlaeufe: Boolean = false,
-              ${'$'}withFilter: Boolean!,
-              ${'$'}filter: FilterInputGraphType,
-              ${'$'}filterTarget: String = "KLIENTEN_AUSWAHL",
-              ${'$'}mitPflichtfeldPruefung: Boolean = false,
-              ${'$'}mitConsilMetaInfos: Boolean = false,
-              ${'$'}stammdatenKlienten: Boolean = false,
-              ${'$'}auchInaktive: Boolean = false
-            ) {
-              klienten(
-                klientId: ${'$'}klientId
-                auchAbwesende: ${'$'}auchAbwesende
-                nurPdBereiche: ${'$'}nurPdBereiche
-                bereichId: ${'$'}bereichId
-                datum: ${'$'}datum
-                filter: ${'$'}filter
-                filterTarget: ${'$'}filterTarget
-                mitPflichtfeldPruefung: ${'$'}mitPflichtfeldPruefung
-                stammdatenKlienten: ${'$'}stammdatenKlienten
-                auchInaktive: ${'$'}auchInaktive
-              ) {
-                id
-                name
-                vorname
-                geburtsdatum
-              }
-            }
-            """
     }
 
     @OptIn(ExperimentalEncodingApi::class)
