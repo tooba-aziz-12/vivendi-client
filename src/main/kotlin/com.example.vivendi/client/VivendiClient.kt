@@ -65,10 +65,22 @@ class VivendiClient(
 
     suspend fun getResidents(
         session: LoginResponse,
+        fields: List<String>,
         sectionId: Int = 195
     ): List<ResidentResponse> {
+
+        val query = """
+            query klientenListe(${'$'}bereichId: Int) {
+              klienten(bereichId: ${'$'}bereichId) {
+                ${fields.joinToString("\n")}
+              }
+            }
+        """.trimIndent()
+
         val response: ResidentsGraphQlResponse = httpClient.post("$baseUrl/graphql") {
+
             contentType(ContentType.Application.Json)
+
             header("abfrage-hash", "042c8160c5546a719a016009189e8364")
             header("x-client-product-type", "pd")
             header("x-client-version", "26.2.2")
@@ -93,7 +105,7 @@ class VivendiClient(
                         withFilter = false,
                         filter = LoadFilter(loadFilter = true)
                     ),
-                    query = RESIDENTS_QUERY
+                    query = query
                 )
             )
         }.body()

@@ -8,6 +8,15 @@ class ResidentService(
     private val client: VivendiClient
 ) {
 
-    suspend fun getResidents(session: LoginResponse): List<ResidentResponse> =
-        client.getResidents(session)
+    suspend fun getResidents(session: LoginResponse): List<ResidentResponse> {
+        return client.getResidents(
+            session = session,
+            fields = listOf(
+                "id",
+                "name",
+                "vorname",
+                "geburtsdatum"
+            )
+        )
+    }
 }
