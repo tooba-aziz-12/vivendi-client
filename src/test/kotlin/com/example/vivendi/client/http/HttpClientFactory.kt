@@ -1,6 +1,7 @@
 package com.example.vivendi.client.http
 
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.*
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logging
@@ -10,8 +11,8 @@ import kotlinx.serialization.json.Json
 
 object HttpClientFactory {
 
-    fun create(): HttpClient {
-        return HttpClient(CIO) {
+    fun create(engine: HttpClientEngine? = null): HttpClient {
+        return HttpClient(engine ?: CIO.create()) {
 
             install(ContentNegotiation) {
                 json(
