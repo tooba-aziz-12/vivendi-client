@@ -98,7 +98,7 @@ Reference document containing the captured requests, check following screenshots
 
 **docs/Vivendi-reverse-engineered.pdf**
 
-![img.png](rsa-key-api.png)![img_1.png](login-api.png)![img_2.png](resident-fetch-api.png)![img_3.png](resident-fetch-api-response.png)
+![img.png](assets/rsa-key-api.png)![img_1.png](assets/login-api.png)![img_2.png](assets/resident-fetch-api.png)![img_3.png](assets/resident-fetch-api-response.png)
 
 ### Residents Fetch Flow:
 
@@ -132,7 +132,7 @@ The Auth-Token (JWT) is available in the response and also set as a cookie. Howe
 
 Because subsequent GraphQL requests require both the authentication cookie and the XSRF header, the client extracts these values from the response cookies and stores them for later use.
 
-![img_4.png](login-cookies.png)
+![img_4.png](assets/login-cookies.png)
 
 These tokens are then attached to all GraphQL requests as:
 
@@ -177,3 +177,87 @@ Two custom exceptions are defined:
 * Invalid response format during JSON parsing
 
 Using custom exceptions makes it easier to tell the difference between login problems and API errors, and prevents low-level HTTP or parsing errors from appearing directly in the higher parts of the application.
+
+## Handling Large Resident Lists
+
+### 1. Local Dataset Synchronization
+
+The GraphQL query used by Vivendi returns the **full list of residents for a section (`bereichId`)**. 
+
+From the inspected request, I could not find any indication of built-in pagination parameters such as `limit`, `offset`, or cursors. This suggests that the API is designed to return the complete dataset for the requested section in a single response.
+
+Directly fetching the full dataset on every client request would not scale well in a production environment when (**in case**) there thousands of records coming in. 
+
+A more scalable architecture would introduce an **integration layer with local synchronization**:
+
+#### In this approach:
+
+- A **scheduled synchronization job** periodically fetches residents from Vivendi.
+- The data is stored in a **local database**.
+- Client applications query the **local service**, not Vivendi directly.
+
+#### This has several advantages:
+
+- **Reduced load on Vivendi** – only the sync job calls the external API.
+- **Low latency for clients** – local database queries are faster than remote API calls.
+- **Better filtering and search capabilities** – complex queries can be executed locally.
+- **Resilience** – the system can continue operating temporarily even if Vivendi is unavailable.
+
+In containerized environments (e.g., Kubernetes), the synchronization job should run as a **dedicated CronJob** rather than inside application pods. This ensures the job executes **once per schedule**, independent of how many application instances are running.
+
+### 2. Server-Side Pagination in the Integration Layer
+
+Another approach is to fetch the dataset from Vivendi and expose a **paginated API from the integration service**.
+
+#### In this case:
+
+- The integration service calls Vivendi when needed.
+- The service **splits the response into smaller pages** before returning it to clients.
+
+#### This approach makes sense when:
+
+- The dataset is relatively small
+- Real-time freshness is important
+- Maintaining a local data store is unnecessary
+- The integration service acts mainly as a **thin proxy layer**
+
+However, if many clients frequently request the data, the synchronization approach generally scales better because it avoids repeatedly calling the external API.
+
+## Production Readiness Considerations
+
+Several aspects should be addressed if this client were used in a production environment.
+
+### Timeouts and Retries
+External API calls should have **configured timeouts** to prevent requests from hanging indefinitely.  
+Retries can be applied for **transient failures** such as network timeouts or temporary server errors (5xx responses), typically with a small exponential backoff.
+
+### Logging and Observability
+Structured logging should be used to make debugging easier in distributed environments.  
+Sensitive data such as **passwords, authentication tokens, and cookies** must be redacted to avoid leaking credentials in logs.
+
+### Rate Limiting and Backoff
+If multiple services depend on this client, rate limiting and backoff strategies help prevent overwhelming the Vivendi API during traffic spikes or failure loops.
+
+### Resilience
+The system should degrade gracefully if the Vivendi API becomes temporarily unavailable.  
+For example, services could rely on **cached or previously synchronized data** instead of failing immediately.
+
+### Monitoring
+Operational metrics should be collected for:
+
+- request latency
+- error rates
+- authentication failures
+- retry counts
+
+These metrics help detect integration issues early and provide visibility into the health of the Vivendi integration.
+
+## Deployment and Scaling Strategy
+
+In a production environment, the client would typically run as part of an **integration service deployed in containers** (e.g., Kubernetes).
+
+Application pods can scale horizontally to handle incoming traffic, since the client itself is stateless.
+
+If resident data synchronization is implemented, the synchronization process should run as a **dedicated scheduled job (e.g., Kubernetes CronJob)** rather than inside application pods. This ensures that the job executes **once per schedule**, regardless of how many service instances are running.
+
+This architecture allows the system to scale client-facing workloads independently while maintaining controlled interaction with the Vivendi API.
