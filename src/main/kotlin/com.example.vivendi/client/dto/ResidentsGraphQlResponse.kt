@@ -1,10 +1,12 @@
 package com.example.vivendi.client.dto
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class ResidentsGraphQlResponse(
-    val data: ResidentsData
+    val data: ResidentsData?,
+    val errors: JsonElement? = null
 )
 
 @Serializable

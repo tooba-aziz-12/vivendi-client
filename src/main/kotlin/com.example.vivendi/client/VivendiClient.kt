@@ -1,13 +1,10 @@
 package com.example.vivendi.client
 
 import com.example.vivendi.auth.dto.LoginRequest
-import com.example.vivendi.client.dto.RsaKeyResponse
 import com.example.vivendi.auth.dto.LoginResponse
-import com.example.vivendi.client.dto.LoadFilter
-import com.example.vivendi.client.dto.ResidentsGraphQlRequest
-import com.example.vivendi.client.dto.ResidentsGraphQlResponse
-import com.example.vivendi.client.dto.ResidentsVariables
+import com.example.vivendi.client.dto.*
 import com.example.vivendi.client.exception.AuthenticationException
+import com.example.vivendi.client.exception.VivendiClientException
 import com.example.vivendi.residents.dto.*
 import com.typesafe.config.Config
 import io.ktor.client.HttpClient
@@ -26,6 +23,9 @@ import javax.crypto.spec.PSource
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import com.typesafe.config.ConfigFactory
+import io.ktor.client.plugins.*
+import io.ktor.serialization.*
+import org.slf4j.LoggerFactory
 
 class VivendiClient(
     private val httpClient: HttpClient,
@@ -33,38 +33,31 @@ class VivendiClient(
 
     private val config: Config = ConfigFactory.load()
     private val baseUrl: String = config.getString("vivendi.baseUrl")
+
+    private val logger = LoggerFactory.getLogger("VivendiClient")
     suspend fun authenticate(username: String, password: String): LoginResponse {
         val rsaKey = fetchRsaPublicKey()
         val encryptedPassword = encryptVivendiV1Password(password, rsaKey)
 
-        val response: HttpResponse = httpClient.post("$baseUrl/auth/login") {
-            contentType(ContentType.Application.Json)
-            header("x-client-product-type", "ng")
-            setBody(
-                LoginRequest(
-                    Username = username,
-                    Password = encryptedPassword,
-                    PublicKey = rsaKey
-                )
-            )
+        val response = executeLogin(username, encryptedPassword, rsaKey)
+
+        if (!response.status.isSuccess()) {
+            throw AuthenticationException("Vivendi login failed: ${response.status}")
         }
 
         val cookies = response.headers
             .getAll(HttpHeaders.SetCookie)
             .orEmpty()
             .map { parseServerSetCookieHeader(it) }
+            .associate { it.name to it.value }
 
-        val authToken = cookies.firstOrNull { it.name == "Auth-Token" }?.value
-            ?:  throw AuthenticationException("Auth-Token cookie missing")
+        val authToken = cookies["Auth-Token"]
+            ?: throw AuthenticationException("Auth-Token cookie missing")
 
-        val xsrfToken = cookies.firstOrNull { it.name == "Xsrf-Token" }?.value
-            ?:  throw AuthenticationException("Xsrf-Token cookie missing")
+        val xsrfToken = cookies["Xsrf-Token"]
+            ?: throw AuthenticationException("Xsrf-Token cookie missing")
 
-
-        return LoginResponse(
-            authToken = authToken,
-            xsrfToken = xsrfToken
-        )
+        return LoginResponse(authToken, xsrfToken)
     }
 
     suspend fun getResidents(
@@ -73,49 +66,109 @@ class VivendiClient(
         sectionId: Int = 195
     ): List<ResidentResponse> {
 
-        val query = GraphQLQueryBuilder.residents(fields)
-        val response: ResidentsGraphQlResponse = httpClient.post("$baseUrl/graphql") {
+        val response = executeResidentsRequest(session, fields, sectionId)
 
+        val data = response.data ?: throw VivendiClientException("Vivendi returned no data")
+
+        return data.klienten.map(::toResidentResponse)
+    }
+
+    private suspend fun executeResidentsRequest(
+        session: LoginResponse,
+        fields: List<String>,
+        sectionId: Int
+    ): ResidentsGraphQlResponse {
+
+        val httpResponse = httpClient.post("$baseUrl/graphql") {
             contentType(ContentType.Application.Json)
 
-            header("abfrage-hash", "042c8160c5546a719a016009189e8364")
-            header("x-client-product-type", "pd")
-            header("x-client-version", "26.2.2")
-            header("x-section-id", sectionId.toString())
-            header("x-xsrf-token", session.xsrfToken)
+            applyHeaders(session, sectionId)
+            applyCookies(session)
 
-            cookie("Auth-Token", session.authToken)
-            cookie("Xsrf-Token", session.xsrfToken)
+            setBody(buildResidentsRequest(fields, sectionId))
+        }
+
+        if (!httpResponse.status.isSuccess()) {
+            logger.error("Vivendi returned HTTP error {}", httpResponse.status)
+            throw VivendiClientException("Vivendi HTTP error: ${httpResponse.status}")
+        }
+
+        val response = parseResponse(httpResponse)
+
+        if (response.errors != null) {
+            logger.error("Vivendi GraphQL errors: {}", response.errors)
+            throw VivendiClientException("Vivendi GraphQL returned errors")
+        }
+
+        return response
+    }
+
+    private suspend fun executeLogin(
+        username: String,
+        encryptedPassword: String,
+        rsaKey: String
+    ): HttpResponse {
+        val response = httpClient.post("$baseUrl/auth/login") {
+            contentType(ContentType.Application.Json)
+            header("x-client-product-type", "ng")
 
             setBody(
-                ResidentsGraphQlRequest(
-                    operationName = "klientenListe",
-                    variables = ResidentsVariables(
-                        bereichId = sectionId,
-                        nurPdBereiche = true,
-                        auchAbwesende = true,
-                        mitVerlauf = false,
-                        alleVerlaeufe = false,
-                        mitPflichtfeldPruefung = false,
-                        mitConsilMetaInfos = false,
-                        filterTarget = "KLIENTEN_AUSWAHL",
-                        withFilter = false,
-                        filter = LoadFilter(loadFilter = true)
-                    ),
-                    query = query
+                LoginRequest(
+                    Username = username,
+                    Password = encryptedPassword,
+                    PublicKey = rsaKey
                 )
             )
-        }.body()
-
-        return response.data.klienten.map {
-            ResidentResponse(
-                id = it.id,
-                firstName = it.vorname,
-                lastName = it.name,
-                birthDate = it.geburtsdatum
-            )
         }
+        return response
     }
+
+    private fun HttpRequestBuilder.applyHeaders(session: LoginResponse, sectionId: Int) {
+        header("abfrage-hash", "042c8160c5546a719a016009189e8364")
+        header("x-client-product-type", "pd")
+        header("x-client-version", "26.2.2")
+        header("x-section-id", sectionId.toString())
+        header("x-xsrf-token", session.xsrfToken)
+    }
+
+    private fun HttpRequestBuilder.applyCookies(session: LoginResponse) {
+        cookie("Auth-Token", session.authToken)
+        cookie("Xsrf-Token", session.xsrfToken)
+    }
+
+    private fun buildResidentsRequest(fields: List<String>, sectionId: Int) =
+        ResidentsGraphQlRequest(
+            operationName = "klientenListe",
+            variables = ResidentsVariables(
+                bereichId = sectionId,
+                nurPdBereiche = true,
+                auchAbwesende = true,
+                mitVerlauf = false,
+                alleVerlaeufe = false,
+                mitPflichtfeldPruefung = false,
+                mitConsilMetaInfos = false,
+                filterTarget = "KLIENTEN_AUSWAHL",
+                withFilter = false,
+                filter = LoadFilter(loadFilter = true)
+            ),
+            query = GraphQLQueryBuilder.residents(fields)
+        )
+
+    private suspend fun parseResponse(httpResponse: HttpResponse): ResidentsGraphQlResponse =
+        try {
+            httpResponse.body()
+        } catch (e: JsonConvertException) {
+            logger.error("Failed to parse Vivendi response", e)
+            throw VivendiClientException("Invalid Vivendi response format", e)
+        }
+
+    private fun toResidentResponse(resident: KlientNode) =
+        ResidentResponse(
+            id = resident.id,
+            firstName = resident.vorname,
+            lastName = resident.name,
+            birthDate = resident.geburtsdatum
+        )
 
     private suspend fun fetchRsaPublicKey(): String {
         val response: RsaKeyResponse = httpClient.get("$baseUrl/auth/rsa-key") {
