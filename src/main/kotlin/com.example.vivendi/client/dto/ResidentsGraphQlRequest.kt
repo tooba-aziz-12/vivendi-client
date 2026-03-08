@@ -18,11 +18,4 @@ data class ResidentsVariables(
     val alleVerlaeufe: Boolean,
     val mitPflichtfeldPruefung: Boolean,
     val mitConsilMetaInfos: Boolean,
-    val filterTarget: String,
-    val withFilter: Boolean,
-    val filter: LoadFilter
-)
-@Serializable
-data class LoadFilter(
-    val loadFilter: Boolean
 )

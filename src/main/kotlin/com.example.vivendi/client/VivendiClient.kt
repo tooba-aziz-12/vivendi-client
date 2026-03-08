@@ -140,16 +140,13 @@ class VivendiClient(
         ResidentsGraphQlRequest(
             operationName = "klientenListe",
             variables = ResidentsVariables(
-                bereichId = sectionId,
-                nurPdBereiche = true,
-                auchAbwesende = true,
-                mitVerlauf = false,
-                alleVerlaeufe = false,
-                mitPflichtfeldPruefung = false,
-                mitConsilMetaInfos = false,
-                filterTarget = "KLIENTEN_AUSWAHL",
-                withFilter = false,
-                filter = LoadFilter(loadFilter = true)
+                bereichId = sectionId, //clients from area 195
+                nurPdBereiche = true, //Only PD areas
+                auchAbwesende = true, //include absent clients
+                mitVerlauf = false, //Do not include care history
+                alleVerlaeufe = false, //If history was included, don't return all
+                mitPflichtfeldPruefung = false, //with required field check (probably checking whether the client has missing required fields)
+                mitConsilMetaInfos = false, //with consultation case information
             ),
             query = GraphQLQueryBuilder.residents(fields)
         )
@@ -162,7 +159,7 @@ class VivendiClient(
             throw VivendiClientException("Invalid Vivendi response format", e)
         }
 
-    private fun toResidentResponse(resident: KlientNode) =
+    private fun toResidentResponse(resident: ClientNode) =
         ResidentResponse(
             id = resident.id,
             firstName = resident.vorname,

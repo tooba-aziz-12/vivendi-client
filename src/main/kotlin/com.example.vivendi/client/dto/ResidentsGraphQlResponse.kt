@@ -11,11 +11,11 @@ data class ResidentsGraphQlResponse(
 
 @Serializable
 data class ResidentsData(
-    val klienten: List<KlientNode>
+    val klienten: List<ClientNode>
 )
 
 @Serializable
-data class KlientNode(
+data class ClientNode(
     val id: Int,
     val name: String,
     val vorname: String,
