@@ -5,6 +5,7 @@ import com.example.vivendi.auth.dto.LoginResponse
 import com.example.vivendi.client.dto.*
 import com.example.vivendi.client.exception.AuthenticationException
 import com.example.vivendi.client.exception.VivendiClientException
+import com.example.vivendi.client.ratelimit.TokenBucket
 import com.example.vivendi.residents.dto.*
 import com.typesafe.config.Config
 import io.ktor.client.HttpClient
@@ -29,6 +30,7 @@ import org.slf4j.LoggerFactory
 
 class VivendiClient(
     private val httpClient: HttpClient,
+    private val rateLimiter: TokenBucket? = null,
 ) {
 
     private val config: Config = ConfigFactory.load()
@@ -79,6 +81,8 @@ class VivendiClient(
         sectionId: Int
     ): ResidentsGraphQlResponse {
 
+        rateLimiter?.acquire()
+
         val httpResponse = httpClient.post("$baseUrl/graphql") {
             contentType(ContentType.Application.Json)
 
@@ -114,9 +118,9 @@ class VivendiClient(
 
             setBody(
                 LoginRequest(
-                    Username = username,
-                    Password = encryptedPassword,
-                    PublicKey = rsaKey
+                    username = username,
+                    password = encryptedPassword,
+                    publicKey = rsaKey
                 )
             )
         }
